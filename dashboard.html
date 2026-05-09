@@ -75,11 +75,11 @@
         <h2>⚙️ لوحة التحكم الإدارية</h2>
         <div class="upload-group">
             <button class="btn btn-primary" onclick="document.getElementById('massarInput').click()">📁 استيراد مسار (Excel)</button>
-            <button class="btn btn-primary" onclick="document.getElementById('timetableInput').click()">📅 جدول الحصص (Image)</button>
+            <button class="btn btn-primary" onclick="document.getElementById('timetableInput').click()">📅 جدول الحصص (Images - Select Multiple)</button>
             <button class="btn btn-primary" onclick="document.getElementById('holidayInput').click()">🏝️ لائحة العطل (Image)</button>
             
             <input type="file" id="massarInput" hidden accept=".xlsx" onchange="uploadMassar(this)">
-            <input type="file" id="timetableInput" hidden accept="image/*" onchange="previewVision(this, 'timetable')">
+            <input type="file" id="timetableInput" hidden accept="image/*" multiple onchange="previewVisionMulti(this, 'timetable')">
             <input type="file" id="holidayInput" hidden accept="image/*" onchange="previewVision(this, 'holidays')">
         </div>
     </div>
@@ -133,63 +133,121 @@
         });
 
         async function fetchStats() {
-            const res = await fetch(`${API_BASE_URL}/api/admin/stats`);
-            const stats = await res.json();
-            document.getElementById('absentToday').textContent = stats.absentToday;
-            document.getElementById('lateToday').textContent = stats.lateToday;
-            document.getElementById('totalStudents').textContent = stats.totalStudents;
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/admin/stats`);
+                const stats = await res.json();
+                document.getElementById('absentToday').textContent = stats.absentToday;
+                document.getElementById('lateToday').textContent = stats.lateToday;
+                document.getElementById('totalStudents').textContent = stats.totalStudents;
+            } catch (err) { console.error("Error fetching stats:", err); }
         }
 
         async function fetchRecentActivity() {
-            const res = await fetch(`${API_BASE_URL}/api/admin/recent-activity`);
-            const activities = await res.json();
-            const feed = document.getElementById('activityFeed');
-            feed.innerHTML = activities.map(a => `
-                <div style="padding:10px; border-bottom:1px solid #eee">
-                    <b>${a.student_name}</b> (${a.class_name}) - 
-                    <span style="color:${a.status === 'Absent' ? 'red' : 'orange'}">${a.status === 'Absent' ? 'غائب' : 'متأخر'}</span>
-                    <br><small style="color:gray">${a.date} | ${a.session} | ${a.subject}</small>
-                </div>
-            `).join('');
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/admin/recent-activity`);
+                const activities = await res.json();
+                const feed = document.getElementById('activityFeed');
+                feed.innerHTML = activities.map(a => `
+                    <div style="padding:10px; border-bottom:1px solid #eee">
+                        <b>${a.student_name}</b> (${a.class_name}) - 
+                        <span style="color:${a.status === 'Absent' ? 'red' : 'orange'}">${a.status === 'Absent' ? 'غائب' : 'متأخر'}</span>
+                        <br><small style="color:gray">${a.date} | ${a.session} | ${a.subject}</small>
+                    </div>
+                `).join('');
+            } catch (err) { console.error("Error fetching recent activity:", err); }
         }
 
         async function uploadMassar(input) {
+            if (!input.files[0]) return;
             const formData = new FormData();
             formData.append('file', input.files[0]);
-            const res = await fetch(`${API_BASE_URL}/api/admin/upload/massar`, { method: 'POST', body: formData });
-            const data = await res.json();
-            alert(data.message);
-            fetchStats();
+            
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/admin/upload/massar`, { method: 'POST', body: formData });
+                const data = await res.json();
+                if (res.ok) {
+                    alert(data.message);
+                    fetchStats();
+                } else {
+                    alert("❌ خطأ: " + (data.error || "فشل الرفع"));
+                }
+            } catch (err) {
+                console.error("Upload Massar error:", err);
+                alert("❌ حدث خطأ أثناء الاتصال بالسيرفر.");
+            }
+        }
+
+        async function previewVisionMulti(input, type) {
+            if (input.files.length === 0) return;
+            currentType = type;
+            const formData = new FormData();
+            
+            for (let i = 0; i < input.files.length; i++) {
+                formData.append('images', input.files[i]);
+            }
+            
+            alert(`⏳ جاري تحليل ${input.files.length} صور بواسطة الذكاء الاصطناعي... يرجى الانتظار.`);
+            
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/admin/upload/timetable-preview`, { method: 'POST', body: formData });
+                const data = await res.json();
+                if (res.ok) {
+                    document.getElementById('jsonPreview').value = JSON.stringify(data, null, 2);
+                    document.getElementById('overrideModal').style.display = 'flex';
+                } else {
+                    alert("❌ خطأ AI: " + (data.error || "فشل التحليل"));
+                }
+            } catch (err) {
+                console.error("Vision AI error:", err);
+                alert("❌ حدث خطأ أثناء معالجة الصور.");
+            }
         }
 
         async function previewVision(input, type) {
+            if (!input.files[0]) return;
             currentType = type;
             const formData = new FormData();
             formData.append('image', input.files[0]);
             
             alert("⏳ جاري تحليل الصورة بواسطة الذكاء الاصطناعي... يرجى الانتظار.");
             
-            const endpoint = type === 'timetable' ? `${API_BASE_URL}/api/admin/upload/timetable-preview` : `${API_BASE_URL}/api/admin/upload/holidays-preview`;
-            const res = await fetch(endpoint, { method: 'POST', body: formData });
-            const data = await res.json();
-            
-            document.getElementById('jsonPreview').value = JSON.stringify(data, null, 2);
-            document.getElementById('overrideModal').style.display = 'flex';
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/admin/upload/holidays-preview`, { method: 'POST', body: formData });
+                const data = await res.json();
+                if (res.ok) {
+                    document.getElementById('jsonPreview').value = JSON.stringify(data, null, 2);
+                    document.getElementById('overrideModal').style.display = 'flex';
+                } else {
+                    alert("❌ خطأ AI: " + (data.error || "فشل التحليل"));
+                }
+            } catch (err) {
+                console.error("Vision AI error:", err);
+                alert("❌ حدث خطأ أثناء معالجة الصورة.");
+            }
         }
 
         document.getElementById('saveVisionBtn').onclick = async () => {
-            const jsonData = JSON.parse(document.getElementById('jsonPreview').value);
-            const endpoint = currentType === 'timetable' ? `${API_BASE_URL}/api/admin/save/timetable` : `${API_BASE_URL}/api/admin/save/holidays`;
-            
-            const res = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(jsonData)
-            });
-            
-            const result = await res.json();
-            alert(result.message);
-            document.getElementById('overrideModal').style.display = 'none';
+            try {
+                const jsonData = JSON.parse(document.getElementById('jsonPreview').value);
+                const endpoint = currentType === 'timetable' ? `${API_BASE_URL}/api/admin/save/timetable` : `${API_BASE_URL}/api/admin/save/holidays`;
+                
+                const res = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(jsonData)
+                });
+                
+                const result = await res.json();
+                if (res.ok) {
+                    alert(result.message);
+                    document.getElementById('overrideModal').style.display = 'none';
+                } else {
+                    alert("❌ خطأ في الحفظ: " + result.error);
+                }
+            } catch (err) {
+                console.error("Save Vision Data error:", err);
+                alert("❌ تأكد من صحة تنسيق JSON.");
+            }
         };
 
         window.onload = () => {

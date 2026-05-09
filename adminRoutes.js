@@ -3,10 +3,17 @@ const router = express.Router();
 const multer = require('multer');
 const XLSX = require('xlsx');
 const fs = require('fs');
+const path = require('path');
 const { db, getMoroccanTime } = require('./database');
 const { parseTimetableImage, parseHolidayImage } = require('./visionService');
 
-const upload = multer({ dest: 'uploads/' });
+// Ensure uploads directory exists
+const uploadDir = 'uploads/';
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const upload = multer({ dest: uploadDir });
 
 // Dashboard Stats
 router.get('/stats', (req, res) => {
@@ -18,12 +25,15 @@ router.get('/stats', (req, res) => {
     };
 
     db.get(queries.absentToday, [today], (err, absent) => {
+        if (err) { console.error("Stats Error (Absent):", err); return res.status(500).json({error: err.message}); }
         db.get(queries.lateToday, [today], (err, late) => {
+            if (err) { console.error("Stats Error (Late):", err); return res.status(500).json({error: err.message}); }
             db.get(queries.totalStudents, [], (err, total) => {
+                if (err) { console.error("Stats Error (Total):", err); return res.status(500).json({error: err.message}); }
                 res.json({
-                    absentToday: absent.count,
-                    lateToday: late.count,
-                    totalStudents: total.count
+                    absentToday: absent ? absent.count : 0,
+                    lateToday: late ? late.count : 0,
+                    totalStudents: total ? total.count : 0
                 });
             });
         });
@@ -40,14 +50,18 @@ router.get('/recent-activity', (req, res) => {
         LIMIT 10
     `;
     db.all(query, [], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
+        if (err) { console.error("Recent Activity Error:", err); return res.status(500).json({ error: err.message }); }
         res.json(rows);
     });
 });
 
 // 1. Massar Excel Import
 router.post('/upload/massar', upload.single('file'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded." });
+    }
     try {
+        console.log(`Processing Massar file: ${req.file.originalname}`);
         const workbook = XLSX.readFile(req.file.path);
         let students = [];
         workbook.SheetNames.forEach(sheetName => {
@@ -78,56 +92,94 @@ router.post('/upload/massar', upload.single('file'), (req, res) => {
             });
         });
 
-        // Batch insert into DB
         const stmt = db.prepare(`INSERT OR REPLACE INTO Students (name, class_name, phone, parent_name) VALUES (?, ?, ?, ?)`);
         students.forEach(s => stmt.run(s.name, s.class_name, s.phone, s.parent_name));
         stmt.finalize();
 
         fs.unlinkSync(req.file.path);
+        console.log(`Successfully imported ${students.length} students.`);
         res.json({ message: `Successfully imported ${students.length} students across ${workbook.SheetNames.length} classes.` });
     } catch (err) {
+        console.error("Massar Import Error:", err);
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
         res.status(500).json({ error: err.message });
     }
 });
 
-// 2. Timetable Image Parsing (Returns JSON for review)
-router.post('/upload/timetable-preview', upload.single('image'), async (req, res) => {
+// 2. Multi-Image Timetable Parsing (Returns Aggregated JSON)
+router.post('/upload/timetable-preview', upload.array('images', 15), async (req, res) => {
+    if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ error: "No images uploaded." });
+    }
+    
     try {
-        const parsedData = await parseTimetableImage(req.file.path);
-        fs.unlinkSync(req.file.path);
-        res.json(parsedData);
+        console.log(`Processing ${req.files.length} timetable images...`);
+        let aggregatedData = [];
+        
+        for (const file of req.files) {
+            try {
+                const parsed = await parseTimetableImage(file.path);
+                if (Array.isArray(parsed)) {
+                    aggregatedData = aggregatedData.concat(parsed);
+                }
+            } catch (innerErr) {
+                console.error(`Error parsing image ${file.originalname}:`, innerErr);
+            } finally {
+                if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+            }
+        }
+        
+        console.log(`Aggregation complete. Found ${aggregatedData.length} total entries.`);
+        res.json(aggregatedData);
     } catch (err) {
-        res.status(500).json({ error: "Failed to parse timetable image: " + err.message });
+        console.error("Timetable Aggregation Error:", err);
+        res.status(500).json({ error: "Failed to process images: " + err.message });
     }
 });
 
 // 3. Save Verified Timetable
 router.post('/save/timetable', (req, res) => {
-    const timetables = req.body; // Array of {class_name, day_of_week, period, session, subject}
-    const stmt = db.prepare(`INSERT INTO Timetables (class_name, day_of_week, period, session, subject) VALUES (?, ?, ?, ?, ?)`);
-    timetables.forEach(t => stmt.run(t.class_name, t.day_of_week, t.period, t.session, t.subject));
-    stmt.finalize();
-    res.json({ message: "Timetable saved successfully." });
+    try {
+        const timetables = req.body;
+        if (!Array.isArray(timetables)) return res.status(400).json({error: "Expected array of entries."});
+        
+        const stmt = db.prepare(`INSERT INTO Timetables (class_name, day_of_week, period, session, subject) VALUES (?, ?, ?, ?, ?)`);
+        timetables.forEach(t => stmt.run(t.class_name, t.day_of_week, t.period, t.session, t.subject));
+        stmt.finalize();
+        res.json({ message: "Timetable saved successfully." });
+    } catch (err) {
+        console.error("Save Timetable Error:", err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
-// 4. Holiday Image Parsing (Returns JSON for review)
+// 4. Holiday Image Parsing
 router.post('/upload/holidays-preview', upload.single('image'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "No image uploaded." });
     try {
+        console.log(`Processing holiday image: ${req.file.originalname}`);
         const parsedData = await parseHolidayImage(req.file.path);
         fs.unlinkSync(req.file.path);
         res.json(parsedData);
     } catch (err) {
+        console.error("Holiday Parse Error:", err);
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
         res.status(500).json({ error: "Failed to parse holiday image: " + err.message });
     }
 });
 
 // 5. Save Verified Holidays
 router.post('/save/holidays', (req, res) => {
-    const holidays = req.body; // Array of {holiday_date, description}
-    const stmt = db.prepare(`INSERT OR REPLACE INTO Holidays (holiday_date, description) VALUES (?, ?)`);
-    holidays.forEach(h => stmt.run(h.holiday_date, h.description));
-    stmt.finalize();
-    res.json({ message: "Holidays saved successfully." });
+    try {
+        const holidays = req.body;
+        const stmt = db.prepare(`INSERT OR REPLACE INTO Holidays (holiday_date, description) VALUES (?, ?)`);
+        holidays.forEach(h => stmt.run(h.holiday_date, h.description));
+        stmt.finalize();
+        res.json({ message: "Holidays saved successfully." });
+    } catch (err) {
+        console.error("Save Holidays Error:", err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 module.exports = router;
