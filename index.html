@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>منصة الغياب الذكية - ثانوية الوحدة</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    
+    <script>
+        // Configuration for Deployment
+        const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+            ? 'http://localhost:3000' 
+            : 'https://your-backend-on-render.onrender.com'; // Replace with your Render URL
+        
+        const socket = io(API_BASE_URL);
+    </script>
+    
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --secondary: #f8fafc;
+            --text-dark: #1e293b;
+            --text-muted: #64748b;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --success: #10b981;
+            --bg-body: #eff6ff;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Cairo', sans-serif; }
+        
+        body { 
+            background-color: var(--bg-body); 
+            padding: 30px 10px; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+        }
+
+        .container { 
+            width: 100%; 
+            max-width: 850px; 
+            background: #fff; 
+            border-radius: 24px; 
+            box-shadow: 0 20px 40px rgba(0,0,0,0.08); 
+            overflow: hidden; 
+            margin-bottom: 20px; 
+        }
+        
+        .official-header { background: #fff; padding: 25px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f1f5f9; }
+        .official-text { text-align: center; font-size: 13px; font-weight: 800; color: var(--text-dark); line-height: 1.6; }
+        .official-logo img { max-height: 75px; object-fit: contain; }
+
+        .stats-bar { background: linear-gradient(135deg, var(--primary), #3b82f6); color: white; padding: 15px 25px; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+        .stats-info { display: flex; gap: 15px; }
+        .stats-info span { font-weight: 800; background: rgba(255,255,255,0.2); padding: 5px 12px; border-radius: 8px; }
+
+        .settings-section { padding: 25px; background-color: #fff; }
+        .row { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
+        .form-group { flex: 1; min-width: 180px; }
+        .form-group label { display: flex; justify-content: space-between; font-size: 14px; font-weight: 800; color: var(--text-dark); margin-bottom: 8px; }
+        .form-control { width: 100%; padding: 12px; border: 2px solid #e2e8f0; border-radius: 10px; font-size: 15px; outline: none; transition: 0.3s; font-weight: 600; }
+        .form-control:focus { border-color: var(--primary); }
+
+        .holiday-alert { display: none; background-color: #fef2f2; color: var(--danger); padding: 12px; border-radius: 10px; margin-bottom: 20px; font-size: 14px; text-align: center; font-weight: 800; border: 1px solid #fecaca; }
+
+        .students-section { display: none; border-top: 2px solid #f1f5f9; background: #fff; }
+        .section-title { padding: 20px 25px; background-color: var(--secondary); font-weight: 800; display: flex; justify-content: space-between; font-size: 16px; }
+        .student-list { list-style: none; max-height: 450px; overflow-y: auto; }
+        .student-item { display: flex; justify-content: space-between; align-items: center; padding: 15px 25px; border-bottom: 1px solid #f1f5f9; }
+        .student-name { font-size: 16px; color: var(--text-dark); font-weight: 800; }
+        .student-details { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+        
+        .badge-indicator { padding: 3px 8px; border-radius: 20px; font-size: 11px; font-weight: 800; color: white; margin-right: 5px; }
+        .badge-indicator.red { background-color: var(--danger); }
+        .badge-indicator.orange { background-color: var(--warning); }
+
+        .actions { display: flex; gap: 8px; }
+        .choice-btn { padding: 8px 16px; border: 2px solid #e2e8f0; border-radius: 10px; font-size: 13px; font-weight: 800; cursor: pointer; transition: 0.2s; background: white; color: var(--text-muted); }
+        .choice-btn.absent-active { background-color: var(--danger) !important; color: white !important; border-color: var(--danger) !important; }
+        .choice-btn.late-active { background-color: var(--warning) !important; color: white !important; border-color: var(--warning) !important; }
+        .choice-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .footer-actions { padding: 25px; background: #fff; text-align: center; display: none; border-top: 1px solid #f1f5f9; }
+        .save-btn { width: 100%; background: linear-gradient(135deg, var(--success), #059669); color: white; padding: 16px; border: none; border-radius: 14px; font-size: 18px; font-weight: 800; cursor: pointer; transition: 0.3s; }
+        .save-btn:disabled { background: #9ca3af; cursor: not-allowed; opacity: 0.7; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="official-header">
+            <div class="official-text">
+                المملكة المغربية<br>وزارة التربية الوطنية والتعليم الأولي والرياضة<br>
+                الأكاديمية الجهوية: <span id="dispAcademy" style="color: var(--primary);">...</span>
+            </div>
+            <div class="official-logo"><img id="dispLogo" src="" alt="شعار" style="display:none;"></div>
+            <div class="official-text">
+                المديرية الإقليمية: <span id="dispDirectorate" style="color: var(--primary);">...</span><br>
+                المؤسسة: <span id="dispSchool" style="color: var(--primary);">...</span><br>مصلحة الحراسة العامة
+            </div>
+        </div>
+
+        <div class="stats-bar">
+            <div class="stats-info">
+                <span>🏫 القسم: <b id="statCurrentClass">-</b></span>
+                <span>👨‍🎓 العدد: <b id="statStudentCount">0</b></span>
+            </div>
+            <div id="subjectBadge" style="background: rgba(255,255,255,0.2); padding: 5px 12px; border-radius: 8px; font-weight: 800;">📚 المادة: ...</div>
+        </div>
+
+        <div class="settings-section">
+            <div id="holidayAlert" class="holiday-alert">⚠️ لا يمكن تسجيل الغياب: التاريخ المختار يصادف عطلة رسمية أو يوم عطلة أسبوعية.</div>
+            
+            <div class="row">
+                <div class="form-group">
+                    <label><span>📅 التاريخ</span></label>
+                    <input type="date" id="currentDate" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>☀️ الفترة</label>
+                    <select id="period" class="form-control">
+                        <option value="صباحية">صباحية</option>
+                        <option value="مسائية">مسائية</option>
+                    </select>
+                </div>
+            </div>
+            <div class="row">
+                <div class="form-group">
+                    <label>⏱️ الحصة</label>
+                    <select id="sessionTime" class="form-control">
+                        <option>الحصة 1</option>
+                        <option>الحصة 2</option>
+                        <option>الحصة 3</option>
+                        <option>الحصة 4</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>🏫 القسم</label>
+                    <select id="classSelect" class="form-control"><option value="">-- اختر القسم --</option></select>
+                </div>
+            </div>
+        </div>
+
+        <div class="students-section" id="studentsSection">
+            <div class="section-title"><span id="classNameLabel">لائحة التلاميذ</span></div>
+            <ul class="student-list" id="studentList"></ul>
+            <div class="footer-actions" id="footerActions">
+                <button class="save-btn" id="saveBtn" onclick="saveAttendance()">✅ حفظ التغييرات وإرسال الغياب</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let holidays = [];
+        let students = [];
+        let tempAttendance = {};
+        let currentSubject = "";
+
+        async function init() {
+            await fetchSettings();
+            await fetchClasses();
+            await fetchHolidays();
+            setupDateInput();
+            checkDateValidity();
+        }
+
+        async function fetchSettings() {
+            const res = await fetch(`${API_BASE_URL}/api/settings`);
+            const settings = await res.json();
+            document.getElementById('dispAcademy').textContent = settings.academy || '...';
+            document.getElementById('dispDirectorate').textContent = settings.directorate || '...';
+            document.getElementById('dispSchool').textContent = settings.school_name || '...';
+            if (settings.logo_url) {
+                document.getElementById('dispLogo').src = settings.logo_url;
+                document.getElementById('dispLogo').style.display = 'block';
+            }
+        }
+
+        async function fetchClasses() {
+            const res = await fetch(`${API_BASE_URL}/api/classes`);
+            const classes = await res.json();
+            const select = document.getElementById('classSelect');
+            classes.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = opt.textContent = c;
+                select.appendChild(opt);
+            });
+        }
+
+        async function fetchHolidays() {
+            const res = await fetch(`${API_BASE_URL}/api/holidays`);
+            holidays = await res.json();
+        }
+
+        function setupDateInput() {
+            const dateInput = document.getElementById('currentDate');
+            const today = new Date().toISOString().split('T')[0];
+            dateInput.max = today;
+            dateInput.value = today;
+            dateInput.onchange = () => { checkDateValidity(); refreshStudentList(); };
+        }
+
+        function checkDateValidity() {
+            const dateVal = document.getElementById('currentDate').value;
+            const periodVal = document.getElementById('period').value;
+            const date = new Date(dateVal);
+            const day = date.getDay(); // 0 = Sunday, 6 = Saturday
+
+            const isWeekend = (day === 0) || (day === 6 && periodVal === 'مسائية');
+            const isHoliday = holidays.includes(dateVal);
+            const isFuture = date > new Date();
+
+            const isInvalid = isWeekend || isHoliday || isFuture;
+            document.getElementById('holidayAlert').style.display = isInvalid ? 'block' : 'none';
+            document.getElementById('saveBtn').disabled = isInvalid;
+            return !isInvalid;
+        }
+
+        async function refreshStudentList() {
+            const className = document.getElementById('classSelect').value;
+            if (!className) return;
+
+            document.getElementById('statCurrentClass').textContent = className;
+            
+            // 1. Fetch Students & Stats
+            const res = await fetch(`${API_BASE_URL}/api/students/${className}`);
+            students = await res.json();
+            document.getElementById('statStudentCount').textContent = students.length;
+
+            // 2. Lookup Subject from Timetable
+            const date = document.getElementById('currentDate').value;
+            const dayName = new Date(date).toLocaleDateString('ar-MA', { weekday: 'long' });
+            const period = document.getElementById('period').value;
+            const session = document.getElementById('sessionTime').value;
+
+            const ttRes = await fetch(`${API_BASE_URL}/api/timetable/lookup?class_name=${className}&day_of_week=${dayName}&period=${period}&session=${session}`);
+            const ttData = await ttRes.json();
+            currentSubject = ttData.subject;
+            document.getElementById('subjectBadge').textContent = `📚 المادة: ${currentSubject}`;
+
+            // 3. Render List
+            const list = document.getElementById('studentList');
+            list.innerHTML = '';
+            tempAttendance = {};
+
+            students.forEach(student => {
+                const li = document.createElement('li');
+                li.className = 'student-item';
+                
+                let badges = '';
+                if (student.absent_count > 0) badges += `<span class="badge-indicator red">🔴 غياب: ${student.absent_count}</span>`;
+                if (student.late_count > 0) badges += `<span class="badge-indicator orange">🟠 تأخر: ${student.late_count}</span>`;
+
+                li.innerHTML = `
+                    <div>
+                        <div class="student-name">${student.name} ${badges}</div>
+                        <div class="student-details">${student.phone ? '📱 ' + student.phone : 'بدون هاتف'}</div>
+                    </div>
+                    <div class="actions">
+                        <button class="choice-btn" onclick="toggleStatus(this, ${student.id}, 'متأخر')">متأخر</button>
+                        <button class="choice-btn" onclick="toggleStatus(this, ${student.id}, 'غائب')">غائب</button>
+                    </div>
+                `;
+                list.appendChild(li);
+            });
+
+            document.getElementById('studentsSection').style.display = 'block';
+            document.getElementById('footerActions').style.display = 'block';
+        }
+
+        function toggleStatus(btn, studentId, status) {
+            const parent = btn.parentElement;
+            const isActive = btn.classList.contains('absent-active') || btn.classList.contains('late-active');
+            
+            parent.querySelectorAll('.choice-btn').forEach(b => b.className = 'choice-btn');
+
+            if (!isActive) {
+                btn.classList.add(status === 'غائب' ? 'absent-active' : 'late-active');
+                tempAttendance[studentId] = status;
+            } else {
+                delete tempAttendance[studentId];
+            }
+        }
+
+        async function saveAttendance() {
+            if (!checkDateValidity()) return;
+            
+            const payload = {
+                date: document.getElementById('currentDate').value,
+                period: document.getElementById('period').value,
+                session: document.getElementById('sessionTime').value,
+                class_name: document.getElementById('classSelect').value,
+                subject: currentSubject,
+                absentees: tempAttendance
+            };
+
+            const res = await fetch(`${API_BASE_URL}/api/attendance`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (res.ok) {
+                alert("✨ تم حفظ الغياب وإرسال التنبيهات!");
+                refreshStudentList(); // Refresh to update badges
+            } else {
+                alert("❌ حدث خطأ أثناء الحفظ");
+            }
+        }
+
+        document.getElementById('period').onchange = () => { checkDateValidity(); refreshStudentList(); };
+        document.getElementById('sessionTime').onchange = refreshStudentList;
+        document.getElementById('classSelect').onchange = refreshStudentList;
+
+        window.onload = init;
+    </script>
+</body>
+</html>
